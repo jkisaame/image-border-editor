@@ -1,0 +1,13 @@
+# PyInstaller Build Clutter
+build/
+dist/
+*.spec
+pyinstaller.exe
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Sample Test Images
+test_photos/
+output_images/
