@@ -1,0 +1,145 @@
+name: Build Linux Executables
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers automatically when you push a version tag like v1.1.0
+
+jobs:
+  # --- JOB 1: Build for Linux x86_64 ---
+  build-linux-x86:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-with-version: '3.10'
+
+      - name: Install System and Python Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Test & Validate Source Code (Headless)
+        run: |
+          # Use xvfb-run to simulate a display server for tkinter in a headless cloud environment
+          xvfb-run python -c "
+          import tkinter as tk
+          from PIL import Image, ImageOps
+          print('Libraries loaded successfully.')
+          
+          # Automated test of core border logic using your repo test image
+          try:
+              img = Image.open('test_input.jpg')
+              bordered = ImageOps.expand(img, border=100, fill='white')
+              bordered.save('test_output_x86.png')
+              print('Validation Test Passed: Border successfully applied.')
+          except Exception as e:
+              print(f'Validation Test Failed: {e}')
+              exit(1)
+          "
+
+      - name: Compile with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --name=image_editor_borders_linux_x86 image_editor_borders.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86-executable
+          path: dist/image_editor_borders_linux_x86
+
+  # --- JOB 2: Build for Linux ARM64 ---
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and Test in ARM64 Docker Container
+        run: |
+          # We run inside an ARM64 ubuntu container to safely cross-compile and test
+          docker run --rm --platform linux/arm64 -v ${{ github.workspace }}:/workspace -w /workspace ubuntu:22.04 /bin/bash -c "
+            apt-get update && apt-get install -y python3 python3-pip python3-tk xvfb
+            python3 -m pip install --upgrade pip
+            pip3 install -r requirements.txt
+            pip3 install pyinstaller
+            
+            # Validation Test
+            xvfb-run python3 -c \"
+            import tkinter as tk
+            from PIL import Image, ImageOps
+            img = Image.open('test_input.jpg')
+            bordered = ImageOps.expand(img, border=100, fill='black')
+            bordered.save('test_output_arm64.png')
+            print('ARM64 Validation Test Passed.')
+            \"
+            
+            # Compile Binary
+            pyinstaller --onefile --windowed --name=image_editor_borders_linux_arm64 image_editor_borders.py
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-executable
+          path: dist/image_editor_borders_linux_arm64
+
+  # --- JOB 3: Create GitHub Release ---
+  create-release:
+    needs: [build-linux-x86, build-linux-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download x86 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86-executable
+          path: ./release-assets
+
+      - name: Download ARM64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-executable
+          path: ./release-assets
+
+      - name: Generate Release Notes Asset
+        run: |
+          cat << 'EOF' > release_notes.md
+          ## Image Border Editor - Linux Release (${{ github.ref_name }})
+
+          A lightweight, cross-platform graphical user interface (GUI) utility written in Python that allows users to easily add clean white or black borders to their images.
+
+          ### Features
+          * **Simple GUI:** Intuitive layout built entirely with native Python interface components (`tkinter`).
+          * **Dynamic Sizing:** Choose between Small, Medium, and Large presets.
+          * **Customizable Architecture:** Clean code structure allowing easy modification of underlying pixel widths.
+          * **Open Source:** Released under the GPL 3.0 License.
+
+          ### Architecture Portability Update
+          This release introduces fully automated, cloud-compiled Linux binaries tested for environment stability:
+          * `image_editor_borders_linux_x86`: For standard Intel/AMD 64-bit Linux environments.
+          * `image_editor_borders_linux_arm64`: For ARM64 Linux systems (e.g., Raspberry Pi, AWS Graviton, or ARM64 virtual machines).
+
+          *Note: Linux users may need to ensure `python3-tk` is installed on their system distribution package manager for GUI rendering (`sudo apt-get install python3-tk`). Run `chmod +x <filename>` to make the downloaded binary executable.*
+          EOF
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: |
+            release-assets/image_editor_borders_linux_x86
+            release-assets/image_editor_borders_linux_arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
