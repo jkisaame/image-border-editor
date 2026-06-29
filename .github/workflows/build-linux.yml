@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-with-version: '3.10'
+          python-version: '3.10'
 
       - name: Install System and Python Dependencies
         run: |
@@ -67,26 +67,34 @@ jobs:
 
       - name: Build and Test in ARM64 Docker Container
         run: |
-          # We run inside an ARM64 ubuntu container to safely cross-compile and test
-          docker run --rm --platform linux/arm64 -v ${{ github.workspace }}:/workspace -w /workspace ubuntu:22.04 /bin/bash -c "
-            apt-get update && apt-get install -y python3 python3-pip python3-tk xvfb
-            python3 -m pip install --upgrade pip
-            pip3 install -r requirements.txt
-            pip3 install pyinstaller
-            
-            # Validation Test
-            xvfb-run python3 -c \"
-            import tkinter as tk
-            from PIL import Image, ImageOps
-            img = Image.open('test_input.jpg')
-            bordered = ImageOps.expand(img, border=100, fill='black')
-            bordered.save('test_output_arm64.png')
-            print('ARM64 Validation Test Passed.')
-            \"
-            
-            # Compile Binary
-            pyinstaller --onefile --windowed --name=image_editor_borders_linux_arm64 image_editor_borders.py
-          "
+          # Configure local timezone files and frontend parameters directly inside the container before running apt-get
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ubuntu:22.04 /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              ln -snf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+              echo 'Etc/UTC' > /etc/timezone
+              
+              apt-get update
+              apt-get install -y --no-install-recommends tzdata python3 python3-pip python3-tk xvfb
+              python3 -m pip install --upgrade pip
+              pip3 install -r requirements.txt
+              pip3 install pyinstaller
+              
+              # Validation Test
+              xvfb-run python3 -c \"
+              import tkinter as tk
+              from PIL import Image, ImageOps
+              img = Image.open('test_input.jpg')
+              bordered = ImageOps.expand(img, border=100, fill='black')
+              bordered.save('test_output_arm64.png')
+              print('ARM64 Validation Test Passed.')
+              \"
+              
+              # Compile Binary
+              pyinstaller --onefile --windowed --name=image_editor_borders_linux_arm64 image_editor_borders.py
+            "
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -140,6 +148,7 @@ jobs:
           body_path: release_notes.md
           files: |
             release-assets/image_editor_borders_linux_x86
+            release-assets/release-assets/image_editor_borders_linux_arm64
             release-assets/image_editor_borders_linux_arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
